@@ -40,6 +40,7 @@ Canvasレンダリングを使用することで、約2000台のマーカーを�
     ```bash
     pnpm dev
     ```
+    ※ 起動時に圧縮された道路データ (`.gz`) が自動的に解凍されます。
     ブラウザで `http://localhost:4321` にアクセスしてください。
 
 ## 🐳 Dockerでの実行方法
@@ -48,6 +49,7 @@ Canvasレンダリングを使用することで、約2000台のマーカーを�
     ```bash
     docker build -t gx-car-plot .
     ```
+    ※ ビルドプロセス内でデータの解凍が行われます。
 
 2.  コンテナの起動:
     ```bash
@@ -60,15 +62,18 @@ Canvasレンダリングを使用することで、約2000台のマーカーを�
 ```text
 /
 ├── public/
-│   ├── N01-07L-2K_Road.shp.geojson  # 道路データ
-│   └── local_shipping_*.svg         # 車両アイコン
+│   ├── N01-07L-2K_Road.shp.geojson.gz # 道路データ（圧縮済み）
+│   ├── N01-07L-2K_Road.shp.geojson    # 道路データ（自動解凍により生成）
+│   └── local_shipping_*.svg           # 車両アイコン
+├── scripts/
+│   └── prepare-data.mjs               # データ解凍スクリプト
 ├── src/
 │   ├── components/
-│   │   └── map.astro                # 地図コンポーネント（メインロジック）
+│   │   └── map.astro                  # 地図コンポーネント（メインロジック）
 │   └── pages/
-│       └── index.astro              # メインページ
-├── Dockerfile                       # Dockerビルド設定
-└── astro.config.mjs                 # Astro設定
+│       └── index.astro                # メインページ
+├── Dockerfile                         # Dockerビルド設定
+└── astro.config.mjs                   # Astro設定
 ```
 
 ## 📚 出典
