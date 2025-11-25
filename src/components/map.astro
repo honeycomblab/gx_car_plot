@@ -1,0 +1,165 @@
+---
+import 'leaflet/dist/leaflet.css';
+---
+<div id="map" style="height: 95vh; width: 100%;"></div>
+<script>
+    import L from 'leaflet';
+
+    // Canvasレンダリングを有効化してパフォーマンスを向上
+    const map = L.map('map', {
+        preferCanvas: true
+    }).setView([35.6895, 139.6917], 10);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // GeoJSONをロードして表示し、アニメーションを開始する
+    fetch('/N01-07L-2K_Road.shp.geojson')
+        .then(response => response.json())
+        .then(data => {
+            // 道路データを地図に表示（薄く）
+            // L.geoJSON(data, {
+            //     style: {
+            //         color: '#3388ff',
+            //         weight: 2,
+            //         opacity: 0.5
+            //     }
+            // }).addTo(map);
+
+            // データをセグメント単位に分解して保持
+            const allSegments: number[][][] = [];
+            data.features.forEach((feature: any) => {
+                if (feature.geometry.type === 'MultiLineString') {
+                    feature.geometry.coordinates.forEach((coords: number[][]) => {
+                        // [lng, lat] -> [lat, lng]
+                        allSegments.push(coords.map(c => [c[1], c[0]]));
+                    });
+                } else if (feature.geometry.type === 'LineString') {
+                     allSegments.push(feature.geometry.coordinates.map((c: any) => [c[1], c[0]]));
+                }
+            });
+
+            const icons = [
+                '/local_shipping_16dp_000000_FILL0_wght400_GRAD0_opsz20.svg',
+                '/local_shipping_16dp_2FB383_FILL0_wght400_GRAD0_opsz20.svg',
+                '/local_shipping_16dp_4179AF_FILL0_wght400_GRAD0_opsz20.svg',
+                '/local_shipping_16dp_C6012F_FILL0_wght400_GRAD0_opsz20.svg'
+            ];
+            const CARS_PER_ICON = 800;
+
+            icons.forEach(iconUrl => {
+                for (let i = 0; i < CARS_PER_ICON; i++) {
+                    startCarAnimation(allSegments, iconUrl);
+                }
+            });
+        });
+
+    function startCarAnimation(allSegments: number[][][], iconUrl: string) {
+        if (allSegments.length === 0) return;
+
+        // ランダムなセグメントから開始
+        const randomSegment = allSegments[Math.floor(Math.random() * allSegments.length)];
+        
+        // 速度を決定 (40km/h 〜 60km/h)
+        const speedKmh = 40 + Math.random() * 20;
+
+        // マーカーを作成
+        const carIcon = L.icon({
+            iconUrl: iconUrl,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
+        // 初期位置
+        const marker = L.marker(randomSegment[0] as [number, number], { icon: carIcon }).addTo(map);
+
+        runSegmentAnimation(marker, randomSegment, allSegments, speedKmh, iconUrl);
+    }
+
+    function runSegmentAnimation(marker: L.Marker, path: number[][], allSegments: number[][][], speedKmh: number, iconUrl: string) {
+        animateMarker(marker, path, 0, speedKmh, () => {
+            // アニメーション終了、次の接続セグメントを探す
+            const currentEnd = path[path.length - 1];
+            const nextPath = findNextPath(currentEnd, path, allSegments);
+
+            if (nextPath) {
+                runSegmentAnimation(marker, nextPath, allSegments, speedKmh, iconUrl);
+            } else {
+                // 接続先がない場合はマーカーを削除して別の場所から再開
+                map.removeLayer(marker);
+                startCarAnimation(allSegments, iconUrl);
+            }
+        });
+    }
+
+    function findNextPath(currentEnd: number[], currentPath: number[][], allSegments: number[][][]) {
+        const threshold = 0.0005; // 接続判定の閾値 (度単位)。約50m程度
+        const candidates: number[][][] = [];
+
+        for (const seg of allSegments) {
+            // 直前のパスと同じオブジェクトならスキップ（単純な往復を避けるため）
+            if (seg === currentPath) continue;
+
+            const start = seg[0];
+            const end = seg[seg.length - 1];
+
+            // 始点が近い
+            if (Math.abs(start[0] - currentEnd[0]) < threshold && Math.abs(start[1] - currentEnd[1]) < threshold) {
+                candidates.push(seg);
+            }
+            // 終点が近い（逆走）
+            else if (Math.abs(end[0] - currentEnd[0]) < threshold && Math.abs(end[1] - currentEnd[1]) < threshold) {
+                candidates.push([...seg].reverse());
+            }
+        }
+
+        if (candidates.length > 0) {
+            // ランダムに選択
+            return candidates[Math.floor(Math.random() * candidates.length)];
+        }
+        return null;
+    }
+
+    function animateMarker(marker: L.Marker, path: number[][], index: number, speedKmh: number, onComplete: () => void) {
+        if (index >= path.length - 1) {
+            onComplete();
+            return;
+        }
+
+        const start = path[index];
+        const end = path[index + 1];
+        
+        // 距離(m)を計算
+        const distMeters = map.distance(start as [number, number], end as [number, number]);
+        
+        // 速度 (m/ms) = km/h / 3600
+        // 例: 60km/h = 60000m/3600000ms = 0.0166 m/ms
+        const speedMms = speedKmh / 3600;
+        
+        // 所要時間 (ms)
+        // 距離が0の場合は即終了
+        const duration = distMeters > 0 ? distMeters / speedMms : 0;
+
+        const startTime = performance.now();
+
+        function step(currentTime: number) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 線形補間
+            const lat = start[0] + (end[0] - start[0]) * progress;
+            const lng = start[1] + (end[1] - start[1]) * progress;
+
+            marker.setLatLng([lat, lng]);
+
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                // 次の区間へ
+                animateMarker(marker, path, index + 1, speedKmh, onComplete);
+            }
+        }
+
+        requestAnimationFrame(step);
+    }
+</script>
